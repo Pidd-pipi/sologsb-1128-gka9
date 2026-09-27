@@ -6,6 +6,8 @@ import { emptyPortFilter, type FishingPort, type PortFilter, type SupplyCapabili
 import type { Berth, BerthStatus } from '../types/berth';
 import type { CallDraft, PortCall } from '../types/call';
 import { buildBerthRecords } from '../db/berth';
+import { checkCallSupply } from '../utils/quota';
+import { useVesselStore } from './vesselStore';
 
 export interface PortInput {
   name: string;
@@ -143,8 +145,21 @@ export const usePortStore = defineStore('port', () => {
 
   /**
    * 登记一条进出港记录，并同步泊位占用状态（进港 → 占用，出港 → 释放）。
+   * 落库前先核对渔港补给能力与渔船当月剩余额度：任一不通过即抛错，
+   * 既不写流水，也不改变泊位。
    */
   async function registerCall(draft: CallDraft, vesselName: string, portId: string): Promise<PortCall> {
+    const vesselStore = useVesselStore();
+    const violations = checkCallSupply(
+      draft,
+      vesselStore.vesselById(draft.vesselId) ?? null,
+      portById(portId) ?? null,
+      calls.value,
+    );
+    if (violations.length) {
+      throw new Error(violations.map((v) => v.message).join('；'));
+    }
+
     const call: PortCall = {
       id: uid('c'),
       vesselId: draft.vesselId,

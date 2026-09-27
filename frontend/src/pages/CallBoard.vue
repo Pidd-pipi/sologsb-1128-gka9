@@ -11,6 +11,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import type { Berth } from '../types/berth';
 import { CALL_TYPES, VISA_STATUSES, emptyCallDraft, type CallDraft, type CallType } from '../types/call';
 import { formatDateTime, formatNumber, isToday, nowLocalInputValue, toPlain } from '../utils/format';
+import { monthLabel, monthSupplyUsage } from '../utils/quota';
 
 interface CallForm extends CallDraft {
   portId: string;
@@ -40,6 +41,39 @@ const rules: FormRules = {
 const vesselOptions = computed(() => vesselStore.vessels);
 
 const selectedVessel = computed(() => vesselStore.vesselById(form.value.vesselId));
+
+/** 额度统计口径：登记时间所在自然月（解析失败退回当前月），与保存时核对口径一致 */
+const quotaRefDate = computed(() => {
+  const d = new Date(form.value.time);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+});
+
+const quotaMonthLabel = computed(() => monthLabel(quotaRefDate.value));
+
+/** 该船当月已用加冰 / 加油（含本月全部既有流水，登记成功后立即重算） */
+const monthUsage = computed(() =>
+  selectedVessel.value
+    ? monthSupplyUsage(portStore.calls, selectedVessel.value.id, quotaRefDate.value)
+    : { iceKg: 0, fuelL: 0 },
+);
+
+const iceRemaining = computed(() =>
+  selectedVessel.value ? selectedVessel.value.monthlyIceQuotaKg - monthUsage.value.iceKg : 0,
+);
+const fuelRemaining = computed(() =>
+  selectedVessel.value ? selectedVessel.value.monthlyFuelQuotaL - monthUsage.value.fuelL : 0,
+);
+
+/** 所选渔港不供应的补给项目（提前提示；保存时仍会强制核对） */
+const selectedPort = computed(() => portStore.portById(form.value.portId));
+const supplyLacking = computed(() => {
+  const port = selectedPort.value;
+  if (!port) return [] as Array<'加冰' | '加油'>;
+  const lacking: Array<'加冰' | '加油'> = [];
+  if (!port.supply.ice) lacking.push('加冰');
+  if (!port.supply.fuel) lacking.push('加油');
+  return lacking;
+});
 
 /** 进港只能选空闲泊位；出港只能选已占用泊位 */
 const berthOptions = computed(() => {
@@ -153,6 +187,8 @@ async function submit(): Promise<void> {
     clearDraft();
     Object.assign(form.value, {
       ...emptyCallDraft(),
+      // 保留渔船选择：额度面板随即刷新，可立即看到登记后的剩余额度
+      vesselId: form.value.vesselId,
       portId: '',
       time: nowLocalInputValue(),
     });
@@ -210,6 +246,26 @@ function openVessel(vesselId: string): void {
               </el-select>
             </el-form-item>
 
+            <el-form-item v-if="selectedVessel" :label="`${quotaMonthLabel}额度`">
+              <div class="quota-panel" data-testid="quota-panel">
+                <div class="quota-line">
+                  <el-tag size="small" effect="plain">加冰</el-tag>
+                  <span>已用 {{ formatNumber(monthUsage.iceKg, 0) }} kg ／ 额度 {{ formatNumber(selectedVessel.monthlyIceQuotaKg, 0) }} kg</span>
+                  <span class="quota-remaining" :class="{ 'quota-remaining--danger': iceRemaining <= 0 }" data-testid="ice-remaining">
+                    剩余 {{ formatNumber(iceRemaining, 0) }} kg
+                  </span>
+                </div>
+                <div class="quota-line">
+                  <el-tag size="small" effect="plain">加油</el-tag>
+                  <span>已用 {{ formatNumber(monthUsage.fuelL, 0) }} L ／ 额度 {{ formatNumber(selectedVessel.monthlyFuelQuotaL, 0) }} L</span>
+                  <span class="quota-remaining" :class="{ 'quota-remaining--danger': fuelRemaining <= 0 }" data-testid="fuel-remaining">
+                    剩余 {{ formatNumber(fuelRemaining, 0) }} L
+                  </span>
+                </div>
+                <p class="quota-hint">按登记时间所在月份统计，含该月全部既有流水；超出剩余额度或港口不供应时将无法保存。</p>
+              </div>
+            </el-form-item>
+
             <el-form-item label="进出港类型" prop="type">
               <el-radio-group v-model="form.type" data-testid="call-type">
                 <el-radio-button v-for="t in CALL_TYPES" :key="t" :value="t">{{ t }}</el-radio-button>
@@ -238,6 +294,16 @@ function openVessel(vesselId: string): void {
                 <el-option v-for="opt in berthOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
             </el-form-item>
+
+            <el-alert
+              v-if="selectedPort && supplyLacking.length"
+              type="warning"
+              show-icon
+              :closable="false"
+              class="supply-alert"
+              data-testid="supply-lacking-alert"
+              :title="`${selectedPort.name}不供应${supplyLacking.join('、')}，填写对应补给量将无法保存`"
+            />
 
             <el-row :gutter="12">
               <el-col :span="8">
@@ -376,5 +442,39 @@ function openVessel(vesselId: string): void {
   margin: 10px 0 0;
   font-size: 12px;
   color: #6b7c8c;
+}
+.quota-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: #f5f8fb;
+  border-radius: 8px;
+}
+.quota-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #4b5c6d;
+  flex-wrap: wrap;
+}
+.quota-remaining {
+  font-weight: 600;
+  color: #2f6f4f;
+}
+.quota-remaining--danger {
+  color: #c45656;
+}
+.quota-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #7b8a99;
+}
+.supply-alert {
+  margin: 0 0 18px 110px;
+  width: calc(100% - 110px);
+  border-radius: 8px;
 }
 </style>

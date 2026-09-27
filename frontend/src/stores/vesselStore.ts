@@ -16,6 +16,8 @@ export interface VesselInput {
   hullMaterial: FishingVessel['hullMaterial'];
   owner: string;
   certificateExpiry: string;
+  monthlyIceQuotaKg: number;
+  monthlyFuelQuotaL: number;
 }
 
 export const useVesselStore = defineStore('vessel', () => {
@@ -75,6 +77,8 @@ export const useVesselStore = defineStore('vessel', () => {
       hullMaterial: input.hullMaterial,
       owner: input.owner.trim(),
       certificateExpiry: input.certificateExpiry,
+      monthlyIceQuotaKg: Number(input.monthlyIceQuotaKg) || 0,
+      monthlyFuelQuotaL: Number(input.monthlyFuelQuotaL) || 0,
       createdAt: new Date().toISOString(),
     };
     // 写库前脱代理，避免 DataCloneError
