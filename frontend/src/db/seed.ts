@@ -88,6 +88,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '林海平',
     certificateExpiry: '2027-06-30',
+    monthlyIceQuotaKg: 15000,
+    monthlyFuelQuotaL: 12000,
     createdAt: daysAgo(300),
   },
   {
@@ -103,6 +105,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '王阿明',
     certificateExpiry: '2026-11-15',
+    monthlyIceQuotaKg: 12000,
+    monthlyFuelQuotaL: 10000,
     createdAt: daysAgo(260),
   },
   {
@@ -118,6 +122,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '木质',
     owner: '郑友良',
     certificateExpiry: '2026-02-28',
+    monthlyIceQuotaKg: 8000,
+    monthlyFuelQuotaL: 6000,
     createdAt: daysAgo(210),
   },
   {
@@ -133,6 +139,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '玻璃钢',
     owner: '陈小军',
     certificateExpiry: '2027-03-20',
+    monthlyIceQuotaKg: 5000,
+    monthlyFuelQuotaL: 4000,
     createdAt: daysAgo(180),
   },
   {
@@ -148,6 +156,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '张卫国',
     certificateExpiry: '2028-01-10',
+    monthlyIceQuotaKg: 18000,
+    monthlyFuelQuotaL: 15000,
     createdAt: daysAgo(120),
   },
   {
@@ -163,6 +173,8 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '铝合金',
     owner: '刘建军',
     certificateExpiry: '2026-08-05',
+    monthlyIceQuotaKg: 6000,
+    monthlyFuelQuotaL: 5000,
     createdAt: daysAgo(90),
   },
 ];

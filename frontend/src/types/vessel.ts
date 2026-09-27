@@ -8,6 +8,12 @@ export type HullMaterial = '钢质' | '木质' | '玻璃钢' | '铝合金';
 
 export const HULL_MATERIALS: HullMaterial[] = ['钢质', '木质', '玻璃钢', '铝合金'];
 
+/** 合作社默认月度加冰额度 kg（旧档案迁移与新建档案的初始值） */
+export const DEFAULT_MONTHLY_ICE_QUOTA_KG = 10000;
+
+/** 合作社默认月度加油额度 L（旧档案迁移与新建档案的初始值） */
+export const DEFAULT_MONTHLY_FUEL_QUOTA_L = 10000;
+
 /** 渔船技术档案 */
 export interface FishingVessel {
   id: string;
@@ -33,6 +39,10 @@ export interface FishingVessel {
   owner: string;
   /** 证书有效期（YYYY-MM-DD） */
   certificateExpiry: string;
+  /** 合作社月度加冰额度 kg */
+  monthlyIceQuotaKg: number;
+  /** 合作社月度加油额度 L */
+  monthlyFuelQuotaL: number;
   createdAt: string;
 }
 

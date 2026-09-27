@@ -10,6 +10,8 @@ import BerthGrid from '../components/common/BerthGrid.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import type { Berth } from '../types/berth';
 import { CALL_TYPES, VISA_STATUSES, emptyCallDraft, type CallDraft, type CallType } from '../types/call';
+import { supplyText } from '../types/port';
+import { monthQuotaUsage } from '../utils/quota';
 import { formatDateTime, formatNumber, isToday, nowLocalInputValue, toPlain } from '../utils/format';
 
 interface CallForm extends CallDraft {
@@ -40,6 +42,38 @@ const rules: FormRules = {
 const vesselOptions = computed(() => vesselStore.vessels);
 
 const selectedVessel = computed(() => vesselStore.vesselById(form.value.vesselId));
+
+/** 所选泊位对应的渔港（用于展示补给能力） */
+const selectedPort = computed(() => (form.value.portId ? portStore.portById(form.value.portId) : undefined));
+
+/** 额度核算月份：跟随表单时间，默认当月 */
+const quotaRefDate = computed(() => {
+  const d = form.value.time ? new Date(form.value.time) : new Date();
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+});
+
+const quotaMonthLabel = computed(() => `${quotaRefDate.value.getFullYear()}年${quotaRefDate.value.getMonth() + 1}月`);
+
+/** 该船当月已用与剩余额度（本月已有流水实时计入） */
+const monthUsage = computed(() =>
+  selectedVessel.value ? monthQuotaUsage(selectedVessel.value, portStore.calls, quotaRefDate.value) : null,
+);
+
+/** 本次申请是否超出剩余额度（仅即时提示，最终核对在保存时进行） */
+const iceOver = computed(
+  () => Boolean(monthUsage.value) && Number(form.value.iceKg) > 0 && Number(form.value.iceKg) > monthUsage.value!.iceRemainingKg,
+);
+const fuelOver = computed(
+  () => Boolean(monthUsage.value) && Number(form.value.fuelL) > 0 && Number(form.value.fuelL) > monthUsage.value!.fuelRemainingL,
+);
+
+/** 所选渔港是否不具备对应补给能力 */
+const iceUnsupported = computed(
+  () => Boolean(selectedPort.value) && !selectedPort.value!.supply.ice && Number(form.value.iceKg) > 0,
+);
+const fuelUnsupported = computed(
+  () => Boolean(selectedPort.value) && !selectedPort.value!.supply.fuel && Number(form.value.fuelL) > 0,
+);
 
 /** 进港只能选空闲泊位；出港只能选已占用泊位 */
 const berthOptions = computed(() => {
@@ -149,7 +183,11 @@ async function submit(): Promise<void> {
       visaStatus: form.value.visaStatus,
     };
     const call = await portStore.registerCall(payload, selectedVessel.value.name, form.value.portId);
-    ElMessage.success(`已登记 ${call.vesselName} ${call.type} · 泊位 ${call.berthNo}`);
+    // 登记成功后立即重算余额（store 中流水已更新），提示当月剩余额度
+    const after = monthQuotaUsage(selectedVessel.value, portStore.calls, new Date(call.time));
+    ElMessage.success(
+      `已登记 ${call.vesselName} ${call.type} · 泊位 ${call.berthNo}；${quotaMonthLabel.value}加冰剩余 ${formatNumber(after.iceRemainingKg, 0)} kg、加油剩余 ${formatNumber(after.fuelRemainingL, 0)} L`,
+    );
     clearDraft();
     Object.assign(form.value, {
       ...emptyCallDraft(),
@@ -158,7 +196,8 @@ async function submit(): Promise<void> {
     });
     focusPortId.value = '';
   } catch (error) {
-    ElMessage.error(`登记失败：${(error as Error).message}`);
+    // 核对未通过：说明具体项目与差额，流水未保存、泊位未变更
+    ElMessage.error({ message: `登记失败：${(error as Error).message}`, duration: 6000 });
   } finally {
     submitting.value = false;
   }
@@ -175,7 +214,7 @@ function openVessel(vesselId: string): void {
       <div>
         <h1>进出港登记</h1>
         <p class="page__sub">
-          选择渔船与进出港类型，填写泊位号、加冰量、加油量与卸货量，提交后自动同步泊位占用状态
+          选择渔船与进出港类型，填写泊位号、加冰量、加油量与卸货量；保存时按渔港补给能力与该船当月剩余额度核对，通过后同步泊位占用状态
         </p>
       </div>
     </header>
@@ -237,6 +276,36 @@ function openVessel(vesselId: string): void {
               >
                 <el-option v-for="opt in berthOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
               </el-select>
+            </el-form-item>
+
+            <el-form-item v-if="monthUsage" label="月度额度">
+              <div class="quota-panel" data-testid="quota-panel">
+                <p class="quota-line">
+                  <el-tag size="small" effect="plain">加冰</el-tag>
+                  {{ quotaMonthLabel }}已用 {{ formatNumber(monthUsage.iceUsedKg, 0) }} kg · 额度
+                  {{ formatNumber(monthUsage.iceQuotaKg, 0) }} kg · 剩余
+                  <b :class="{ 'quota-danger': iceOver || monthUsage.iceRemainingKg <= 0 }">
+                    {{ formatNumber(monthUsage.iceRemainingKg, 0) }} kg
+                  </b>
+                  <span v-if="iceOver" class="quota-danger">
+                    （本次申请超出 {{ formatNumber(Number(form.iceKg) - monthUsage.iceRemainingKg, 0) }} kg）
+                  </span>
+                  <span v-if="iceUnsupported" class="quota-danger">（{{ selectedPort?.name }}不具备加冰能力）</span>
+                </p>
+                <p class="quota-line">
+                  <el-tag size="small" effect="plain">加油</el-tag>
+                  {{ quotaMonthLabel }}已用 {{ formatNumber(monthUsage.fuelUsedL, 0) }} L · 额度
+                  {{ formatNumber(monthUsage.fuelQuotaL, 0) }} L · 剩余
+                  <b :class="{ 'quota-danger': fuelOver || monthUsage.fuelRemainingL <= 0 }">
+                    {{ formatNumber(monthUsage.fuelRemainingL, 0) }} L
+                  </b>
+                  <span v-if="fuelOver" class="quota-danger">
+                    （本次申请超出 {{ formatNumber(Number(form.fuelL) - monthUsage.fuelRemainingL, 0) }} L）
+                  </span>
+                  <span v-if="fuelUnsupported" class="quota-danger">（{{ selectedPort?.name }}不具备加油能力）</span>
+                </p>
+                <p v-if="selectedPort" class="quota-port">所选渔港补给能力：{{ supplyText(selectedPort.supply) }}</p>
+              </div>
             </el-form-item>
 
             <el-row :gutter="12">
@@ -376,5 +445,32 @@ function openVessel(vesselId: string): void {
   margin: 10px 0 0;
   font-size: 12px;
   color: #6b7c8c;
+}
+.quota-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 12px;
+  background: #f4f8fb;
+  border-radius: 8px;
+}
+.quota-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 13px;
+  color: #40566b;
+  line-height: 1.7;
+}
+.quota-port {
+  margin: 0;
+  font-size: 12px;
+  color: #7b8a99;
+}
+.quota-danger {
+  color: #c45656;
 }
 </style>

@@ -6,6 +6,7 @@ import { emptyPortFilter, type FishingPort, type PortFilter, type SupplyCapabili
 import type { Berth, BerthStatus } from '../types/berth';
 import type { CallDraft, PortCall } from '../types/call';
 import { buildBerthRecords } from '../db/berth';
+import { callSupplyProblems } from '../utils/quota';
 
 export interface PortInput {
   name: string;
@@ -143,17 +144,30 @@ export const usePortStore = defineStore('port', () => {
 
   /**
    * 登记一条进出港记录，并同步泊位占用状态（进港 → 占用，出港 → 释放）。
+   * 保存前核对所选渔港的补给能力与该船当月剩余额度：任一不满足即抛错，
+   * 既不写流水也不改泊位；错误信息说明具体项目与差额。
    */
   async function registerCall(draft: CallDraft, vesselName: string, portId: string): Promise<PortCall> {
+    const callTime = draft.time ? new Date(draft.time) : new Date();
+    const iceKg = Number(draft.iceKg) || 0;
+    const fuelL = Number(draft.fuelL) || 0;
+
+    // 直接读库核对，保证旧档案与本月已有流水（含其他页面刚登记的）都计入
+    const vessel = await db.vessels.get(draft.vesselId);
+    const port = portById(portId) ?? (await db.ports.get(portId));
+    const vesselCalls = await db.calls.where('vesselId').equals(draft.vesselId).toArray();
+    const problems = callSupplyProblems(port, vessel, vesselCalls, iceKg, fuelL, callTime);
+    if (problems.length) throw new Error(problems.join('；'));
+
     const call: PortCall = {
       id: uid('c'),
       vesselId: draft.vesselId,
       vesselName,
       type: draft.type,
-      time: draft.time ? new Date(draft.time).toISOString() : new Date().toISOString(),
+      time: callTime.toISOString(),
       berthNo: draft.berthNo,
-      iceKg: Number(draft.iceKg) || 0,
-      fuelL: Number(draft.fuelL) || 0,
+      iceKg,
+      fuelL,
       unloadKg: Number(draft.unloadKg) || 0,
       visaStatus: draft.visaStatus,
       createdAt: new Date().toISOString(),

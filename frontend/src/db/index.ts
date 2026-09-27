@@ -1,13 +1,14 @@
 import Dexie, { type Table } from 'dexie';
 import type { FishingPort } from '../types/port';
-import type { FishingVessel } from '../types/vessel';
+import { DEFAULT_MONTHLY_FUEL_QUOTA_L, DEFAULT_MONTHLY_ICE_QUOTA_KG, type FishingVessel } from '../types/vessel';
 import type { PortCall } from '../types/call';
 import type { Berth } from '../types/berth';
 import { buildBerthRecords } from './berth';
 
 /**
  * gbfishport-db：库名固定为 gbfishport-db
- * v1 建 ports / vessels；v2 新增 calls 表与 vesselId 索引；v3 新增 berths 表并按泊位数生成初始记录。
+ * v1 建 ports / vessels；v2 新增 calls 表与 vesselId 索引；v3 新增 berths 表并按泊位数生成初始记录；
+ * v4 为既有渔船档案补齐合作社月度加冰 / 加油额度。
  */
 export class FishPortDatabase extends Dexie {
   ports!: Table<FishingPort, string>;
@@ -53,6 +54,17 @@ export class FishPortDatabase extends Dexie {
           }
         }
       });
+
+    this.version(4).upgrade(async (tx) => {
+      // v4 迁移：为旧渔船档案回填合作社月度补给额度，旧档案与本月已有流水一起参与额度核算
+      await tx
+        .table<FishingVessel, string>('vessels')
+        .toCollection()
+        .modify((vessel) => {
+          if (typeof vessel.monthlyIceQuotaKg !== 'number') vessel.monthlyIceQuotaKg = DEFAULT_MONTHLY_ICE_QUOTA_KG;
+          if (typeof vessel.monthlyFuelQuotaL !== 'number') vessel.monthlyFuelQuotaL = DEFAULT_MONTHLY_FUEL_QUOTA_L;
+        });
+    });
   }
 }
 

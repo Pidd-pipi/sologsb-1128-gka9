@@ -16,6 +16,10 @@ export interface VesselInput {
   hullMaterial: FishingVessel['hullMaterial'];
   owner: string;
   certificateExpiry: string;
+  /** 合作社月度加冰额度 kg */
+  monthlyIceQuotaKg: number;
+  /** 合作社月度加油额度 L */
+  monthlyFuelQuotaL: number;
 }
 
 export const useVesselStore = defineStore('vessel', () => {
@@ -75,6 +79,8 @@ export const useVesselStore = defineStore('vessel', () => {
       hullMaterial: input.hullMaterial,
       owner: input.owner.trim(),
       certificateExpiry: input.certificateExpiry,
+      monthlyIceQuotaKg: Number(input.monthlyIceQuotaKg) || 0,
+      monthlyFuelQuotaL: Number(input.monthlyFuelQuotaL) || 0,
       createdAt: new Date().toISOString(),
     };
     // 写库前脱代理，避免 DataCloneError

@@ -5,7 +5,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { useVesselStore, type VesselInput } from '../stores/vesselStore';
 import VesselSpecTable from '../components/common/VesselSpecTable.vue';
 import EmptyState from '../components/common/EmptyState.vue';
-import { HULL_MATERIALS, OPERATION_TYPES } from '../types/vessel';
+import { HULL_MATERIALS, OPERATION_TYPES, DEFAULT_MONTHLY_FUEL_QUOTA_L, DEFAULT_MONTHLY_ICE_QUOTA_KG } from '../types/vessel';
 import { validateVesselNo } from '../utils/tonnage';
 
 const router = useRouter();
@@ -28,6 +28,8 @@ function emptyForm(): VesselInput {
     hullMaterial: '钢质',
     owner: '',
     certificateExpiry: '2027-12-31',
+    monthlyIceQuotaKg: DEFAULT_MONTHLY_ICE_QUOTA_KG,
+    monthlyFuelQuotaL: DEFAULT_MONTHLY_FUEL_QUOTA_L,
   };
 }
 
@@ -148,7 +150,7 @@ function openVessel(vesselId: string): void {
     </EmptyState>
 
     <el-dialog v-model="dialogVisible" title="渔船建档" width="720px" data-testid="vessel-dialog">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="船名" prop="name">
@@ -208,6 +210,18 @@ function openVessel(vesselId: string): void {
               <el-select id="vessel-material" v-model="form.hullMaterial" style="width: 100%">
                 <el-option v-for="m in HULL_MATERIALS" :key="m" :label="m" :value="m" />
               </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="每月加冰额度 kg" prop="monthlyIceQuotaKg">
+              <el-input-number id="vessel-ice-quota" v-model="form.monthlyIceQuotaKg" :min="0" :max="200000" :step="100" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="每月加油额度 L" prop="monthlyFuelQuotaL">
+              <el-input-number id="vessel-fuel-quota" v-model="form.monthlyFuelQuotaL" :min="0" :max="200000" :step="100" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>

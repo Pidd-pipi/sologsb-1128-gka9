@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
 import { useVesselStore } from '../stores/vesselStore';
 import { usePortStore } from '../stores/portStore';
 import VesselSpecTable from '../components/common/VesselSpecTable.vue';
@@ -8,6 +9,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import type { PortCall } from '../types/call';
 import { daysUntilExpiry, expiryText, powerTier, tonnageTier } from '../utils/tonnage';
 import { formatDateTime, formatNumber } from '../utils/format';
+import { monthQuotaUsage } from '../utils/quota';
 
 const route = useRoute();
 const router = useRouter();
@@ -19,6 +21,13 @@ const vessel = computed(() => vesselStore.vesselById(vesselId.value));
 const loaded = ref(false);
 
 const calls = computed<PortCall[]>(() => (vessel.value ? portStore.callsOfVessel(vessel.value.id) : []));
+
+/** 当月额度用量：本月已有流水（含旧档案期间登记的）全部计入 */
+const monthUsage = computed(() => (vessel.value ? monthQuotaUsage(vessel.value, portStore.calls) : null));
+
+const quotaDialogVisible = ref(false);
+const quotaSaving = ref(false);
+const quotaForm = reactive({ ice: 0, fuel: 0 });
 
 const occupancy = computed(() => {
   if (!vessel.value) return [] as Array<{ portName: string; berthNo: string; berthAt: string | null }>;
@@ -51,6 +60,30 @@ function timelineType(call: PortCall): 'primary' | 'success' {
   return call.type === '进港' ? 'primary' : 'success';
 }
 
+function openQuotaDialog(): void {
+  if (!vessel.value) return;
+  quotaForm.ice = vessel.value.monthlyIceQuotaKg;
+  quotaForm.fuel = vessel.value.monthlyFuelQuotaL;
+  quotaDialogVisible.value = true;
+}
+
+async function saveQuota(): Promise<void> {
+  if (!vessel.value) return;
+  quotaSaving.value = true;
+  try {
+    await vesselStore.updateVessel(vessel.value.id, {
+      monthlyIceQuotaKg: Number(quotaForm.ice) || 0,
+      monthlyFuelQuotaL: Number(quotaForm.fuel) || 0,
+    });
+    quotaDialogVisible.value = false;
+    ElMessage.success(`已更新 ${vessel.value.name} 的月度补给额度`);
+  } catch (error) {
+    ElMessage.error(`保存额度失败：${(error as Error).message}`);
+  } finally {
+    quotaSaving.value = false;
+  }
+}
+
 async function bootstrap(): Promise<void> {
   if (!vesselStore.vessels.length) await vesselStore.loadAll();
   if (!portStore.calls.length) await portStore.loadAll();
@@ -79,6 +112,7 @@ watch(vesselId, bootstrap);
         <div class="page__head-actions">
           <el-tag effect="dark">{{ vessel.operationType }}</el-tag>
           <el-tag type="info" effect="plain">{{ vessel.hullMaterial }}</el-tag>
+          <el-button data-testid="open-quota-dialog" @click="openQuotaDialog">调整月度额度</el-button>
           <el-button type="primary" @click="router.push('/calls')">登记进出港</el-button>
         </div>
       </header>
@@ -100,6 +134,20 @@ watch(vesselId, bootstrap);
               <el-descriptions-item label="证书有效期">
                 {{ vessel.certificateExpiry }}
                 <el-tag size="small" :type="expiryTagType" data-testid="expiry-tag">{{ expiryText(vessel.certificateExpiry) }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="每月加冰额度">
+                {{ formatNumber(vessel.monthlyIceQuotaKg, 0) }} kg
+                <template v-if="monthUsage">
+                  （本月已用 {{ formatNumber(monthUsage.iceUsedKg, 0) }} kg，剩余
+                  <b :class="{ 'quota-over': monthUsage.iceRemainingKg <= 0 }">{{ formatNumber(monthUsage.iceRemainingKg, 0) }} kg</b>）
+                </template>
+              </el-descriptions-item>
+              <el-descriptions-item label="每月加油额度">
+                {{ formatNumber(vessel.monthlyFuelQuotaL, 0) }} L
+                <template v-if="monthUsage">
+                  （本月已用 {{ formatNumber(monthUsage.fuelUsedL, 0) }} L，剩余
+                  <b :class="{ 'quota-over': monthUsage.fuelRemainingL <= 0 }">{{ formatNumber(monthUsage.fuelRemainingL, 0) }} L</b>）
+                </template>
               </el-descriptions-item>
               <el-descriptions-item label="累计进出港">{{ calls.length }} 次</el-descriptions-item>
               <el-descriptions-item label="累计加冰 / 加油">
@@ -146,6 +194,24 @@ watch(vesselId, bootstrap);
           <el-button type="primary" @click="router.push('/calls')">登记进出港</el-button>
         </EmptyState>
       </el-card>
+
+      <el-dialog v-model="quotaDialogVisible" title="调整月度补给额度" width="480px" data-testid="quota-dialog">
+        <el-form label-width="130px">
+          <el-form-item label="每月加冰额度 kg">
+            <el-input-number id="quota-ice" v-model="quotaForm.ice" :min="0" :max="200000" :step="100" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="每月加油额度 L">
+            <el-input-number id="quota-fuel" v-model="quotaForm.fuel" :min="0" :max="200000" :step="100" style="width: 100%" />
+          </el-form-item>
+        </el-form>
+        <p v-if="monthUsage" class="quota-hint">
+          本月已用加冰 {{ formatNumber(monthUsage.iceUsedKg, 0) }} kg、加油 {{ formatNumber(monthUsage.fuelUsedL, 0) }} L；调低额度不影响已登记流水，仅约束后续登记。
+        </p>
+        <template #footer>
+          <el-button @click="quotaDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="quotaSaving" data-testid="save-quota" @click="saveQuota">保存额度</el-button>
+        </template>
+      </el-dialog>
     </template>
 
     <EmptyState v-else-if="loaded" title="未找到该渔船" description="该渔船档案可能尚未建立，返回检索页建档后再查看。">
@@ -197,5 +263,14 @@ watch(vesselId, bootstrap);
   flex-wrap: wrap;
   font-size: 13px;
   color: #4b5c6d;
+}
+.quota-over {
+  color: #c45656;
+}
+.quota-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #7b8a99;
+  line-height: 1.6;
 }
 </style>
